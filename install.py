@@ -8,14 +8,21 @@ import io
 # Configuration
 TARGET_MILESTONE = "135"
 DOWNLOAD_DIR = "./chromium_binaries"
-VERSIONS_URL = "https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json"
+VERSIONS_URL = "googlechromelabs.github.io"
 
 
 def get_platform_details():
-    """Returns platform key for Linux systems."""
-    if platform.system() == "Linux" and platform.machine() == "x86_64":
+    """Returns platform key for Windows."""
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    print(machine)
+    if system == "windows" and machine in ["amd64", "x86_64"]:
+        return "win64"
+    elif system == "linux" and machine == "x86_64":
         return "linux64"
-    raise ValueError("Unsupported platform: Only Linux x86_64 is supported.")
+    raise ValueError(
+        "Unsupported platform: Only Linux 64bit and Windows x86 64bit are supported."
+    )
 
 
 def find_latest_build(milestone):
@@ -68,11 +75,12 @@ def download_and_extract(url, download_dir):
         sys.exit(1)
 
 
-def find_executable(download_dir, platform_key):
-    """Searches for the `chrome` executable in the extracted directory."""
+def find_executable(download_dir):
+    """Searches for Chromium executable."""
+    exec_name = "chrome.exe" if platform.system().lower() == "windows" else "chrome"
     for root, _, files in os.walk(download_dir):
-        if "chrome" in files:
-            return os.path.join(root, "chrome")
+        if exec_name in files:
+            return os.path.join(root, exec_name)
     return None
 
 
@@ -92,21 +100,23 @@ if __name__ == "__main__":
             ),
             None,
         )
+
         if not download_url:
             print("Download URL not found for the platform.")
             sys.exit(1)
 
-        # Download and extract
         download_and_extract(download_url, DOWNLOAD_DIR)
 
-        # Search for the executable
-        executable_path = find_executable(DOWNLOAD_DIR, platform_key)
+        executable_path = find_executable(DOWNLOAD_DIR)
         if not executable_path:
             print(f"Executable not found in directory: {DOWNLOAD_DIR}")
             sys.exit(1)
 
-        os.chmod(executable_path, 0o755)
         print(f"Chromium executable ready: {os.path.abspath(executable_path)}")
+
+        if platform.system().lower() == "linux":
+            print("Add execution permission to chromium")
+            os.chmod(executable_path, 0o755)
 
     except Exception as e:
         print(f"Error: {e}")
