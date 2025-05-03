@@ -4,6 +4,9 @@ import os
 import sys
 import zipfile
 import io
+import json
+import urllib.request
+import http.client
 
 # Configuration
 TARGET_MILESTONE = "135"
@@ -25,47 +28,65 @@ def get_platform_details():
     )
 
 
-def find_latest_build(milestone):
-    """Fetches version info for the given milestone."""
+def fetch_version_data():
+    """Fetches version info using `http.client`."""
     try:
-        response = requests.get(VERSIONS_URL, timeout=30)
-        response.raise_for_status()
-        for version in reversed(response.json().get("versions", [])):
-            if version.get("version", "").startswith(milestone + "."):
-                return version
+        conn = http.client.HTTPSConnection(VERSIONS_URL)
+        conn.request(
+            "GET", "/chrome-for-testing/known-good-versions-with-downloads.json"
+        )
+        response = conn.getresponse()
+
+        if response.status != 200:
+            raise Exception(
+                f"Failed to fetch data: {response.status} {response.reason}"
+            )
+
+        data = response.read().decode("utf-8")
+        conn.close()
+        return json.loads(data)
+
     except Exception as e:
         print(f"Error fetching version data: {e}")
         sys.exit(1)
+
+
+def find_latest_build(milestone):
+    """Finds latest build for the given milestone."""
+    versions_data = fetch_version_data()
+    for version in reversed(versions_data.get("versions", [])):
+        if version.get("version", "").startswith(milestone + "."):
+            return version
     print(f"No build found for milestone {milestone}.")
     sys.exit(1)
 
 
 def download_and_extract(url, download_dir):
-    """Downloads and extracts Chromium binaries with progress output."""
+    """Downloads and extracts Chromium binaries."""
     try:
-        response = requests.get(url, stream=True, timeout=600)
-        response.raise_for_status()
-        total_size = int(response.headers.get("content-length", 0))
-        block_size = 8192
         os.makedirs(download_dir, exist_ok=True)
+        print(f"Downloading from {url}...")
 
-        zip_content = io.BytesIO()
-        downloaded_size = 0
-        print(f"Downloading from url {download_url}...")
+        with urllib.request.urlopen(url) as response:
+            total_size = int(response.headers.get("Content-Length", 0))
+            block_size = 8192
+            downloaded_size = 0
+            zip_content = io.BytesIO()
 
-        # Download with progress bar
-        for chunk in response.iter_content(block_size):
-            downloaded_size += len(chunk)
-            zip_content.write(chunk)
-            done = int(50 * downloaded_size / total_size) if total_size > 0 else 0
-            sys.stdout.write(
-                f"\r[{'=' * done}{' ' * (50 - done)}] {downloaded_size / (1024 * 1024):.2f} MB"
-            )
-            sys.stdout.flush()
+            # Download with progress
+            while True:
+                chunk = response.read(block_size)
+                if not chunk:
+                    break
+                downloaded_size += len(chunk)
+                zip_content.write(chunk)
+                done = int(50 * downloaded_size / total_size) if total_size > 0 else 0
+                sys.stdout.write(
+                    f"\r[{'=' * done}{' ' * (50 - done)}] {downloaded_size / (1024 * 1024):.2f} MB"
+                )
+                sys.stdout.flush()
 
         print("\nDownload complete. Extracting...")
-
-        # Extracting the archive
         with zipfile.ZipFile(zip_content) as zf:
             zf.extractall(download_dir)
         print(f"Extracted to: {download_dir}")
@@ -86,11 +107,9 @@ def find_executable(download_dir):
 
 if __name__ == "__main__":
     try:
-        # Detect platform
         platform_key = get_platform_details()
         print(f"Platform detected: {platform_key}")
 
-        # Find version and download URL
         version_info = find_latest_build(TARGET_MILESTONE)
         download_url = next(
             (
