@@ -27,7 +27,26 @@ class WebSocketListener(threading.Thread):
         If `mock_domain` is set, CORS mocking will be enabled for this domain.
         """
         super().__init__()
+        self.mock_domain = mock_domain
         self.websocket = websocket.create_connection(websocket_url)
+        if mock_domain:
+            self._setup_cors(mock_domain)
+
+    def _setup_cors(self, mock_domain):
+        parsed_url = urlparse(mock_domain)
+        full_domain = parsed_url.netloc
+        domain = full_domain.split(":")[0]  # Remove the port if present
+
+        self.mock_domain_pattern = rf"^https?://{re.escape(domain)}(:[0-9]+)?(/|$)"
+
+        # TODO: implement Domain pattern!
+        params = {
+            "patterns": [
+                {"urlPattern": "*", "requestStage": "Response"},
+            ],
+        }
+
+        self.send_cdp_command("Fetch.enable", params)
 
     def run(self):
         """
@@ -61,6 +80,8 @@ class WebSocketListener(threading.Thread):
 
                     if method == "Fetch.requestPaused":
                         self._mock_domain(message)
+                    elif method == "Network.loadingFailed":
+                        print(message)
 
                     # Add event details to the response queue
                     self.response_queue.put(message)  # Store all events
@@ -90,6 +111,40 @@ class WebSocketListener(threading.Thread):
         self.running = False
         if self.websocket:
             self.websocket.close()
+
+    def _mock_domain(self, message, params=None):
+        params = message["params"]
+        request_id = params["requestId"]
+        request = params["request"]
+        request_url = request["url"]
+
+        if not re.match(self.mock_domain_pattern, request_url):
+            self.send_cdp_command("Fetch.continueResponse", {"requestId": request_id})
+
+        status_code = params.get("responseStatusCode", 200)
+        response_headers = params.get("responseHeaders", [])
+
+        response_headers = params.get("responseHeaders", [])
+
+        # Convert headers to a dictionary for easy lookup
+        header_dict = {header["name"]: header["value"] for header in response_headers}
+
+        # Update or add the header
+        header_dict["access-control-allow-origin"] = "*"
+
+        # Convert back to list format
+        response_headers = [
+            {"name": name, "value": value} for name, value in header_dict.items()
+        ]
+
+        self.send_cdp_command(
+            "Fetch.continueResponse",
+            {
+                "requestId": request_id,
+                "responseCode": status_code,
+                "responseHeaders": response_headers,
+            },
+        )
 
     def send_cdp_command(self, command, params={}):
         """
