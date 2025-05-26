@@ -1,4 +1,3 @@
-import requests
 import platform
 import os
 import sys
@@ -10,7 +9,7 @@ import http.client
 
 # Configuration
 TARGET_MILESTONE = "135"
-DOWNLOAD_DIR = "./chromium_binaries"
+DOWNLOAD_DIR = os.path.join(os.getcwd(), "chromium")
 VERSIONS_URL = "googlechromelabs.github.io"
 
 
